@@ -1,0 +1,262 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Mi Cuenta - Propietario</title>
+  <link rel="stylesheet" href="styles.css">
+  <style>
+    /* (estilos igual que antes) */
+    * {
+      box-sizing: border-box;
+    }
+    .container {
+      max-width: 1200px;
+      margin: auto;
+      padding: 20px;
+    }
+    header {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      background-color: #333;
+      color: white;
+      padding: 1rem;
+      flex-wrap: wrap;
+    }
+    .header-left {
+      display: flex;
+      align-items: center;
+      gap: 20px;
+      flex-wrap: wrap;
+    }
+    header h1 {
+      margin: 0;
+      font-size: 1.5rem;
+    }
+    .btn-header {
+      width: 160px;
+      padding: 8px 12px;
+      border: none;
+      border-radius: 4px;
+      cursor: pointer;
+      font-size: 14px;
+      text-align: center;
+    }
+    #btnCambiarPassword {
+      background-color: #28a745;
+      color: white;
+    }
+    #btnCambiarPassword:hover {
+      background-color: #218838;
+    }
+    #logout {
+      background-color: #dc3545;
+      color: white;
+    }
+    #logout:hover {
+      background-color: #c82333;
+    }
+    .info-box {
+      background: #e9ecef;
+      padding: 15px;
+      border-radius: 5px;
+      margin-bottom: 20px;
+    }
+    table {
+      width: 100%;
+      border-collapse: collapse;
+      margin-top: 20px;
+    }
+    th, td {
+      border: 1px solid #ddd;
+      padding: 8px;
+      text-align: left;
+    }
+    th {
+      background-color: #f2f2f2;
+    }
+    .pendiente {
+      color: orange;
+      font-weight: bold;
+    }
+    .verificado {
+      color: green;
+      font-weight: bold;
+    }
+    .btn-agregar-pago {
+      background-color: #007bff;
+      color: white;
+      margin-bottom: 10px;
+    }
+    .btn-editar, .btn-eliminar {
+      padding: 4px 8px;
+      margin: 0 2px;
+      cursor: pointer;
+      border: none;
+      border-radius: 3px;
+    }
+    .btn-editar {
+      background-color: #ffc107;
+      color: #212529;
+    }
+    .btn-eliminar {
+      background-color: #dc3545;
+      color: white;
+    }
+    .modal {
+      display: none;
+      position: fixed;
+      z-index: 10000;
+      left: 0;
+      top: 0;
+      width: 100%;
+      height: 100%;
+      background-color: rgba(0,0,0,0.5);
+      overflow: auto;
+    }
+    .modal-content {
+      background-color: #fefefe;
+      margin: 5% auto;
+      padding: 20px;
+      border: 1px solid #888;
+      width: 500px;
+      max-width: 90%;
+      border-radius: 8px;
+      position: relative;
+    }
+    .modal-content .close {
+      position: absolute;
+      right: 15px;
+      top: 10px;
+      font-size: 24px;
+      cursor: pointer;
+    }
+    .form-group {
+      margin-bottom: 15px;
+    }
+    .form-group label {
+      display: block;
+      font-weight: bold;
+      margin-bottom: 5px;
+    }
+    .form-group input {
+      width: 100%;
+      padding: 8px;
+      border: 1px solid #ccc;
+      border-radius: 4px;
+    }
+    .tasa-info {
+      background: #e7f3ff;
+      padding: 10px;
+      border-radius: 4px;
+      margin: 10px 0;
+    }
+    .acciones-pago {
+      display: flex;
+      gap: 5px;
+    }
+  </style>
+</head>
+<body>
+  <header>
+    <div class="header-left">
+      <h1>Bienvenido, <span id="propietarioNombre">---</span></h1>
+      <button id="btnCambiarPassword" class="btn-header">Cambiar Contraseña</button>
+    </div>
+    <button id="logout" class="btn-header">Cerrar sesión</button>
+  </header>
+  <div class="container">
+    <div class="info-box">
+      <p><strong>Apartamento:</strong> <span id="propietarioApartamento">---</span></p>
+      <p><strong>Email:</strong> <span id="propietarioEmail">---</span></p>
+      <p><strong>Teléfono:</strong> <span id="propietarioTelefono">---</span></p>
+      <p id="saldoEstado" style="font-weight: bold;">---</p>
+    </div>
+
+    <h2>Deudas Pendientes</h2>
+    <button id="btnRecargar" style="background-color: #17a2b8; margin-bottom: 10px;">Recargar Datos</button>
+    <table id="tablaDeudas">
+      <thead>
+        <tr>
+          <th>Período</th>
+          <th>Monto (USD)</th>
+          <th>Vencimiento</th>
+          <th>Descripción de gastos</th>
+          <th>Estado</th>
+        </tr>
+      </thead>
+      <tbody></tbody>
+    </table>
+
+    <h2>Mis Pagos</h2>
+    <button id="btnAgregarPago" class="btn-agregar-pago">+ Registrar Pago</button>
+    <table id="tablaPagos">
+      <thead>
+        <tr>
+          <th>Fecha Pago</th>
+          <th>Monto (Bs)</th>
+          <th>Tasa BCV</th>
+          <th>Monto (USD)</th>
+          <th>Referencia</th>
+          <th>Estado</th>
+          <th>Fecha Verificación</th>
+          <th>Acciones</th>
+        </tr>
+      </thead>
+      <tbody></tbody>
+    </table>
+  </div>
+
+  <!-- Modal para cambiar contraseña -->
+  <div id="modalPassword" class="modal" style="display:none;">
+    <div class="modal-content">
+      <span class="close">&times;</span>
+      <h3>Cambiar Contraseña</h3>
+      <form id="formPassword">
+        <div class="form-group">
+          <label>Nueva Contraseña:</label>
+          <input type="password" id="nuevaPassword" required>
+        </div>
+        <div class="form-group">
+          <label>Confirmar Contraseña:</label>
+          <input type="password" id="confirmPassword" required>
+        </div>
+        <button type="submit">Guardar</button>
+      </form>
+    </div>
+  </div>
+
+  <!-- Modal para registrar/editar pago -->
+  <div id="modalPago" class="modal" style="display: none;">
+    <div class="modal-content">
+      <span class="close">&times;</span>
+      <h3 id="modalPagoTitulo">Registrar Pago</h3>
+      <div id="tasaActual" class="tasa-info">Cargando tasa BCV...</div>
+      <form id="formPago">
+        <input type="hidden" id="pagoId" value="">
+        <div class="form-group">
+          <label>Fecha de Pago:</label>
+          <input type="date" id="fechaPago" required>
+        </div>
+        <div class="form-group">
+          <label>Monto en Bolívares (Bs):</label>
+          <input type="number" step="0.01" id="montoPago" required>
+        </div>
+        <div class="form-group">
+          <label>Tasa BCV (Bs/USD):</label>
+          <input type="number" step="0.01" id="tasaPago" required>
+          <small>Si la tasa no se cargó automáticamente, ingrésala manualmente.</small>
+        </div>
+        <div class="form-group">
+          <label>Número de Referencia:</label>
+          <input type="text" id="referenciaPago" required>
+        </div>
+        <button type="submit">Guardar</button>
+      </form>
+    </div>
+  </div>
+
+  <script src="propietario.js"></script>
+</body>
+</html>
