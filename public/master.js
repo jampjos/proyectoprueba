@@ -1,4 +1,4 @@
-// public/master.js - Versión con mejoras solicitadas
+// public/master.js - Versión con mejoras solicitadas (descripción en gastos específicos)
 console.log('🖥️ Master UI cargada');
 
 const API_BASE = '/api';
@@ -203,27 +203,45 @@ function validarSumaAlicuotas() {
   }
 }
 
-// ========== GASTOS ESPECÍFICOS (en bolívares) ==========
+// ========== GASTOS ESPECÍFICOS (en bolívares, con descripción) ==========
 function agregarGastoEspecifico() {
   const container = document.getElementById('gastosEspecificosContainer');
   if (!container) return;
   const row = document.createElement('div');
   row.className = 'gasto-especifico-row';
+  row.style.display = 'flex';
+  row.style.gap = '10px';
+  row.style.alignItems = 'center';
+  row.style.marginBottom = '8px';
+  row.style.backgroundColor = '#e9ecef';
+  row.style.padding = '8px';
+  row.style.borderRadius = '4px';
+  row.style.flexWrap = 'wrap';
+
   const selectTipo = document.createElement('select');
   selectTipo.innerHTML = '<option value="grupo">Afecta a un grupo (reparto equitativo)</option><option value="propietario">Afecta a un propietario específico</option>';
+  selectTipo.style.flex = '1';
   const selectDestino = document.createElement('select');
   selectDestino.innerHTML = '<option value="">Seleccione...</option>';
+  selectDestino.style.flex = '1';
+  const inputDescripcion = document.createElement('input');
+  inputDescripcion.type = 'text';
+  inputDescripcion.placeholder = 'Descripción del gasto';
+  inputDescripcion.style.flex = '1.5';
   const inputMontoVES = document.createElement('input');
   inputMontoVES.type = 'number';
   inputMontoVES.step = 'any';
   inputMontoVES.placeholder = 'Monto VES';
   inputMontoVES.className = 'gasto-especifico-monto-ves';
+  inputMontoVES.style.flex = '1';
   const usdSpan = document.createElement('span');
   usdSpan.className = 'gasto-especifico-usd';
   usdSpan.innerText = '0.00 USD';
+  usdSpan.style.flex = '0.8';
   const btnEliminar = document.createElement('button');
   btnEliminar.textContent = '✖';
   btnEliminar.style.backgroundColor = '#dc3545';
+  btnEliminar.style.padding = '5px 10px';
 
   async function cargarDestinos() {
     if (selectTipo.value === 'grupo') {
@@ -253,25 +271,13 @@ function agregarGastoEspecifico() {
     actualizarUSD();
     recalcularTodo();
   });
-  // Cuando cambie la tasa BCV, actualizar todos los gastos específicos (esto se llama desde obtenerTasaBCV y desde el input manual)
-  const actualizarTodos = () => {
-    actualizarUSD();
-    recalcularTodo();
-  };
-  // Escuchar cambios en el campo de tasa (para actualización manual)
-  const tasaInput = document.getElementById('tasaBCV');
-  if (tasaInput) {
-    tasaInput.addEventListener('input', () => {
-      currentTasaBCV = parseFloat(tasaInput.value);
-      actualizarUSD();
-      recalcularTodo();
-    });
-  }
-  inputMontoVES.addEventListener('input', actualizarTodos);
+  inputDescripcion.addEventListener('input', () => recalcularTodo());
   selectDestino.addEventListener('change', () => recalcularTodo());
   btnEliminar.addEventListener('click', () => { row.remove(); recalcularTodo(); });
+
   row.appendChild(selectTipo);
   row.appendChild(selectDestino);
+  row.appendChild(inputDescripcion);
   row.appendChild(inputMontoVES);
   row.appendChild(usdSpan);
   row.appendChild(btnEliminar);
@@ -294,17 +300,18 @@ async function recalcularTodo() {
   }
   if (!validarSumaAlicuotas()) return;
 
-  // Obtener gastos específicos: ahora cada fila tiene monto en VES y se convierte a USD según la tasa actual
+  // Obtener gastos específicos: ahora cada fila tiene descripción, monto en VES y destino
   const gastosEsp = [];
   const rowsEsp = document.querySelectorAll('#gastosEspecificosContainer .gasto-especifico-row');
   for (const row of rowsEsp) {
     const tipo = row.querySelector('select:first-child')?.value;
     const destinoSelect = row.querySelector('select:nth-child(2)');
+    const descripcion = row.querySelector('input[type="text"]')?.value;
     const montoVES = parseFloat(row.querySelector('.gasto-especifico-monto-ves')?.value);
     if (destinoSelect && destinoSelect.value && !isNaN(montoVES) && montoVES > 0 && currentTasaBCV > 0) {
       const [tipoDest, id] = destinoSelect.value.split('_');
       const montoUSD = montoVES / currentTasaBCV;
-      gastosEsp.push({ tipo: tipoDest, id: parseInt(id), monto: montoUSD });
+      gastosEsp.push({ tipo: tipoDest, id: parseInt(id), monto: montoUSD, descripcion: descripcion || 'Gasto específico' });
     }
   }
 
@@ -434,13 +441,14 @@ document.getElementById('formRecibo')?.addEventListener('submit', async (e) => {
       return;
     }
 
-    // 3. Gastos específicos (en VES, convertir a USD)
+    // 3. Gastos específicos (con descripción, monto en VES, destino)
     const gastosEspecificos = [];
     const rowsEsp = document.querySelectorAll('#gastosEspecificosContainer .gasto-especifico-row');
     const gruposEnAlicuota = new Set(alicuotasGrupo.map(ag => ag.grupoId));
     for (const row of rowsEsp) {
       const tipo = row.querySelector('select:first-child')?.value;
       const destinoSelect = row.querySelector('select:nth-child(2)');
+      const descripcion = row.querySelector('input[type="text"]')?.value;
       const montoVES = parseFloat(row.querySelector('.gasto-especifico-monto-ves')?.value);
       if (destinoSelect?.value && !isNaN(montoVES) && montoVES > 0) {
         const [tipoDest, id] = destinoSelect.value.split('_');
@@ -452,7 +460,12 @@ document.getElementById('formRecibo')?.addEventListener('submit', async (e) => {
           }
         }
         const montoUSD = montoVES / currentTasaBCV;
-        gastosEspecificos.push({ tipo: tipoDest, id: parseInt(id), monto: montoUSD });
+        gastosEspecificos.push({
+          tipo: tipoDest,
+          id: parseInt(id),
+          monto: montoUSD,
+          descripcion: descripcion || 'Gasto específico'
+        });
       }
     }
     const totalGastosEspecificosUSD = gastosEspecificos.reduce((sum, ge) => sum + ge.monto, 0);
