@@ -1,4 +1,5 @@
 // public/propietario.js - Panel del propietario con detalle de recibos y comprobantes
+// Modificado: muestra monto en Bs en gastos específicos y agrega botón de imprimir/PDF.
 
 console.log('Panel de propietario cargado');
 
@@ -161,7 +162,7 @@ async function cargarDeudas() {
   }
 }
 
-// ========== MODAL DE DETALLE DEL RECIBO (CORREGIDO) ==========
+// ========== MODAL DE DETALLE DEL RECIBO (CON BOTÓN IMPRIMIR Y MONTO BS EN ESPECÍFICOS) ==========
 let modalDetalle = document.getElementById('modalDetalleRecibo');
 if (!modalDetalle) {
   modalDetalle = document.createElement('div');
@@ -172,6 +173,9 @@ if (!modalDetalle) {
       <span class="close">&times;</span>
       <h3>Detalles del Recibo</h3>
       <div id="detalleReciboContent" style="max-height: 70vh; overflow-y: auto;"></div>
+      <div style="margin-top: 15px; text-align: center;">
+        <button id="btnImprimirDetalle" style="background-color: #28a745; color: white; border: none; padding: 8px 16px; border-radius: 4px; cursor: pointer;">🖨️ Imprimir / Guardar PDF</button>
+      </div>
     </div>
   `;
   document.body.appendChild(modalDetalle);
@@ -181,6 +185,47 @@ if (!modalDetalle) {
   window.addEventListener('click', (e) => {
     if (e.target === modalDetalle) modalDetalle.style.display = 'none';
   });
+
+  // Evento para el botón de imprimir
+  const btnImprimir = document.getElementById('btnImprimirDetalle');
+  if (btnImprimir) {
+    btnImprimir.addEventListener('click', () => {
+      const contenido = document.getElementById('detalleReciboContent').innerHTML;
+      const titulo = 'Detalles del Recibo';
+      const ventana = window.open('', '_blank', 'width=800,height=600,toolbar=yes,scrollbars=yes');
+      ventana.document.write(`
+        <!DOCTYPE html>
+        <html>
+        <head>
+          <title>${titulo}</title>
+          <style>
+            body { font-family: Arial, sans-serif; padding: 20px; margin: 0; }
+            .detalle-container { max-width: 800px; margin: auto; }
+            table { width: 100%; border-collapse: collapse; margin: 10px 0; }
+            th, td { border: 1px solid #ddd; padding: 8px; text-align: left; }
+            th { background-color: #f2f2f2; }
+            h4 { margin-top: 20px; }
+            @media print {
+              body { margin: 0; padding: 0; }
+              button { display: none; }
+            }
+          </style>
+        </head>
+        <body>
+          <div class="detalle-container">
+            <h3>${titulo}</h3>
+            ${contenido}
+            <p style="text-align: center; margin-top: 30px; font-size: 12px; color: gray;">Documento generado automáticamente - ${new Date().toLocaleString()}</p>
+          </div>
+          <script>
+            window.onload = function() { window.print(); setTimeout(() => window.close(), 500); };
+          <\/script>
+        </body>
+        </html>
+      `);
+      ventana.document.close();
+    });
+  }
 }
 
 async function mostrarDetalleRecibo(reciboId, deudaId) {
@@ -205,7 +250,7 @@ async function mostrarDetalleRecibo(reciboId, deudaId) {
     const totalConEspecificos = recibo.monto_usd || 0;
 
     // Calcular gastos específicos por grupo
-    const especificosPorGrupo = new Map(); // grupoId -> suma
+    const especificosPorGrupo = new Map(); // grupoId -> suma USD
     if (recibo.gastos_especificos && recibo.gastos_especificos.length) {
       recibo.gastos_especificos.forEach(ge => {
         if (ge.tipo === 'grupo') {
@@ -241,11 +286,11 @@ async function mostrarDetalleRecibo(reciboId, deudaId) {
       html += `<p>No hay desglose de gastos generales disponible.</p>`;
     }
 
-    // Gastos específicos (adicionales)
+    // Gastos específicos (adicionales) con monto en Bs también (calculado a partir de USD * tasa del recibo)
     if (recibo.gastos_especificos && recibo.gastos_especificos.length) {
       html += `<h4>🎯 Gastos específicos adicionales:</h4>`;
       html += `<table style="width:100%; border-collapse:collapse; margin-top:10px;">
-        <thead><tr style="background:#f2f2f2;"><th>Afecta a</th><th>Monto (USD)</th></tr></thead>
+        <thead><tr style="background:#f2f2f2;"><th>Afecta a</th><th>Monto (USD)</th><th>Monto (Bs)*</th></tr></thead>
         <tbody>`;
       recibo.gastos_especificos.forEach(ge => {
         let destino = '';
@@ -255,9 +300,18 @@ async function mostrarDetalleRecibo(reciboId, deudaId) {
         } else {
           destino = `Propietario ID ${ge.id}`;
         }
-        html += `<tr><td>${destino}</td><td>$${(ge.monto || 0).toFixed(2)}</td></tr>`;
+        const montoUSD = ge.monto || 0;
+        // Calcular bolívares usando la tasa del recibo (almacenada en recibo.tasa_bcv)
+        const tasa = recibo.tasa_bcv || 1;
+        const montoBs = montoUSD * tasa;
+        html += `<tr>
+          <td>${destino}</td>
+          <td>$${montoUSD.toFixed(2)}</td>
+          <td>${montoBs.toFixed(2)} Bs</td>
+        </tr>`;
       });
       html += `</tbody></table>`;
+      html += `<p><small>* Monto en bolívares calculado usando la tasa BCV del momento del recibo (${recibo.tasa_bcv?.toFixed(2) || 'N/A'} Bs/USD).</small></p>`;
     }
 
     // Distribución por grupos con montos base + específicos
