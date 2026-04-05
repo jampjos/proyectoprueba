@@ -1,4 +1,4 @@
-// public/master.js - Versión definitiva con corrección de claves para gastos
+// public/master.js - Versión con mejoras solicitadas
 console.log('🖥️ Master UI cargada');
 
 const API_BASE = '/api';
@@ -83,12 +83,33 @@ async function obtenerTasaBCV() {
       if (fechaSpan) fechaSpan.innerText = `Actualizada: ${new Date(currentFechaTasa).toLocaleString()}`;
     }
     calcularTotalGastos();
+    actualizarUSDEnGastosEspecificos(); // actualizar conversión de gastos específicos
+    recalcularTodo();
     return currentTasaBCV;
   } catch (error) {
     console.error('Error obteniendo tasa BCV:', error);
-    alert('No se pudo obtener la tasa BCV');
+    alert('No se pudo obtener la tasa BCV automáticamente. Puedes ingresarla manualmente.');
     return null;
   }
+}
+
+// Función para actualizar el valor en USD de cada gasto específico según la tasa actual
+function actualizarUSDEnGastosEspecificos() {
+  if (!currentTasaBCV || currentTasaBCV <= 0) return;
+  const rows = document.querySelectorAll('#gastosEspecificosContainer .gasto-especifico-row');
+  rows.forEach(row => {
+    const montoVESInput = row.querySelector('.gasto-especifico-monto-ves');
+    const usdSpan = row.querySelector('.gasto-especifico-usd');
+    if (montoVESInput && usdSpan) {
+      const montoVES = parseFloat(montoVESInput.value);
+      if (!isNaN(montoVES) && montoVES > 0) {
+        const usd = montoVES / currentTasaBCV;
+        usdSpan.innerText = usd.toFixed(2) + ' USD';
+      } else {
+        usdSpan.innerText = '0.00 USD';
+      }
+    }
+  });
 }
 
 function agregarFilaGasto(descripcion = '', montoVES = 0) {
@@ -182,7 +203,7 @@ function validarSumaAlicuotas() {
   }
 }
 
-// ========== GASTOS ESPECÍFICOS ==========
+// ========== GASTOS ESPECÍFICOS (en bolívares) ==========
 function agregarGastoEspecifico() {
   const container = document.getElementById('gastosEspecificosContainer');
   if (!container) return;
@@ -192,10 +213,14 @@ function agregarGastoEspecifico() {
   selectTipo.innerHTML = '<option value="grupo">Afecta a un grupo (reparto equitativo)</option><option value="propietario">Afecta a un propietario específico</option>';
   const selectDestino = document.createElement('select');
   selectDestino.innerHTML = '<option value="">Seleccione...</option>';
-  const inputMonto = document.createElement('input');
-  inputMonto.type = 'number';
-  inputMonto.step = '0.01';
-  inputMonto.placeholder = 'Monto USD';
+  const inputMontoVES = document.createElement('input');
+  inputMontoVES.type = 'number';
+  inputMontoVES.step = 'any';
+  inputMontoVES.placeholder = 'Monto VES';
+  inputMontoVES.className = 'gasto-especifico-monto-ves';
+  const usdSpan = document.createElement('span');
+  usdSpan.className = 'gasto-especifico-usd';
+  usdSpan.innerText = '0.00 USD';
   const btnEliminar = document.createElement('button');
   btnEliminar.textContent = '✖';
   btnEliminar.style.backgroundColor = '#dc3545';
@@ -209,15 +234,46 @@ function agregarGastoEspecifico() {
       selectDestino.innerHTML = '<option value="">Seleccione propietario</option>' + props.map(p => `<option value="prop_${p.id}">${p.nombre} (${p.apartamento})</option>`).join('');
     }
   }
+
+  // Función para actualizar el valor en USD según la tasa actual
+  function actualizarUSD() {
+    if (!currentTasaBCV || currentTasaBCV <= 0) return;
+    const montoVES = parseFloat(inputMontoVES.value);
+    if (!isNaN(montoVES) && montoVES > 0) {
+      const usd = montoVES / currentTasaBCV;
+      usdSpan.innerText = usd.toFixed(2) + ' USD';
+    } else {
+      usdSpan.innerText = '0.00 USD';
+    }
+  }
+
   selectTipo.addEventListener('change', cargarDestinos);
   cargarDestinos();
-  const actualizarResumen = () => recalcularTodo();
-  selectDestino.addEventListener('change', actualizarResumen);
-  inputMonto.addEventListener('input', actualizarResumen);
+  inputMontoVES.addEventListener('input', () => {
+    actualizarUSD();
+    recalcularTodo();
+  });
+  // Cuando cambie la tasa BCV, actualizar todos los gastos específicos (esto se llama desde obtenerTasaBCV y desde el input manual)
+  const actualizarTodos = () => {
+    actualizarUSD();
+    recalcularTodo();
+  };
+  // Escuchar cambios en el campo de tasa (para actualización manual)
+  const tasaInput = document.getElementById('tasaBCV');
+  if (tasaInput) {
+    tasaInput.addEventListener('input', () => {
+      currentTasaBCV = parseFloat(tasaInput.value);
+      actualizarUSD();
+      recalcularTodo();
+    });
+  }
+  inputMontoVES.addEventListener('input', actualizarTodos);
+  selectDestino.addEventListener('change', () => recalcularTodo());
   btnEliminar.addEventListener('click', () => { row.remove(); recalcularTodo(); });
   row.appendChild(selectTipo);
   row.appendChild(selectDestino);
-  row.appendChild(inputMonto);
+  row.appendChild(inputMontoVES);
+  row.appendChild(usdSpan);
   row.appendChild(btnEliminar);
   container.appendChild(row);
 }
@@ -238,15 +294,17 @@ async function recalcularTodo() {
   }
   if (!validarSumaAlicuotas()) return;
 
+  // Obtener gastos específicos: ahora cada fila tiene monto en VES y se convierte a USD según la tasa actual
   const gastosEsp = [];
   const rowsEsp = document.querySelectorAll('#gastosEspecificosContainer .gasto-especifico-row');
   for (const row of rowsEsp) {
     const tipo = row.querySelector('select:first-child')?.value;
     const destinoSelect = row.querySelector('select:nth-child(2)');
-    const monto = parseFloat(row.querySelector('input[type="number"]')?.value);
-    if (destinoSelect && destinoSelect.value && !isNaN(monto) && monto > 0) {
+    const montoVES = parseFloat(row.querySelector('.gasto-especifico-monto-ves')?.value);
+    if (destinoSelect && destinoSelect.value && !isNaN(montoVES) && montoVES > 0 && currentTasaBCV > 0) {
       const [tipoDest, id] = destinoSelect.value.split('_');
-      gastosEsp.push({ tipo: tipoDest, id: parseInt(id), monto });
+      const montoUSD = montoVES / currentTasaBCV;
+      gastosEsp.push({ tipo: tipoDest, id: parseInt(id), monto: montoUSD });
     }
   }
 
@@ -301,126 +359,151 @@ async function recalcularTodo() {
   }
 }
 
-// ========== ENVÍO DEL RECIBO (SOLO ALÍCUOTA, CON CLAVES CORREGIDAS) ==========
+// ========== ENVÍO DEL RECIBO (con prevención de doble envío y feedback) ==========
+let isSubmitting = false;
 document.getElementById('formRecibo')?.addEventListener('submit', async (e) => {
   e.preventDefault();
   e.stopPropagation();
 
-  const periodo = document.getElementById('periodoRecibo')?.value;
-  if (!periodo || !/^\d{2}\/\d{4}$/.test(periodo)) {
-    alert('Período inválido (MM/AAAA)');
-    return;
-  }
-  if (!currentTasaBCV || currentTasaBCV <= 0) {
-    alert('Obtenga la tasa BCV primero');
+  if (isSubmitting) {
+    alert('Ya se está procesando el recibo. Por favor espera.');
     return;
   }
 
-  // 1. Gastos generales (con claves corregidas: monto_ves, monto_usd)
-  const gastos = [];
-  const filasGastos = document.querySelectorAll('#gastosContainer .gasto-row');
-  for (let f of filasGastos) {
-    const desc = f.querySelector('.gasto-desc')?.value;
-    const montoVES = parseFloat(f.querySelector('.gasto-monto')?.value);
-    if (desc && !isNaN(montoVES) && montoVES > 0) {
-      gastos.push({
-        descripcion: desc,
-        monto_ves: montoVES,
-        monto_usd: montoVES / currentTasaBCV
-      });
-    }
+  const submitBtn = document.querySelector('#formRecibo button[type="submit"]');
+  const originalText = submitBtn?.textContent || 'Crear Recibo y Deudas';
+  if (submitBtn) {
+    submitBtn.disabled = true;
+    submitBtn.textContent = '⏳ Procesando...';
   }
-  if (gastos.length === 0) {
-    alert('Agregue al menos un gasto general');
-    return;
-  }
-  const totalGastosGeneralesUSD = gastos.reduce((s, g) => s + g.monto_usd, 0);
+  isSubmitting = true;
 
-  // 2. Alícuotas
-  const alicuotasGrupo = [];
-  const rowsGrupo = document.querySelectorAll('#gruposAlicuotasContainer .grupo-alicuota-row');
-  for (const row of rowsGrupo) {
-    const select = row.querySelector('select');
-    const input = row.querySelector('input[type="number"]');
-    if (select?.value && input?.value) {
-      alicuotasGrupo.push({ grupoId: parseInt(select.value), porcentaje: parseFloat(input.value) });
-    }
-  }
-  if (!validarSumaAlicuotas()) {
-    alert('La suma de alícuotas debe ser 100%');
-    return;
-  }
-
-  // 3. Gastos específicos y validación
-  const gastosEspecificos = [];
-  const rowsEsp = document.querySelectorAll('#gastosEspecificosContainer .gasto-especifico-row');
-  const gruposEnAlicuota = new Set(alicuotasGrupo.map(ag => ag.grupoId));
-  for (const row of rowsEsp) {
-    const tipo = row.querySelector('select:first-child')?.value;
-    const destinoSelect = row.querySelector('select:nth-child(2)');
-    const monto = parseFloat(row.querySelector('input[type="number"]')?.value);
-    if (destinoSelect?.value && !isNaN(monto) && monto > 0) {
-      const [tipoDest, id] = destinoSelect.value.split('_');
-      if (tipoDest === 'grupo') {
-        const grupoId = parseInt(id);
-        if (!gruposEnAlicuota.has(grupoId)) {
-          alert(`Error: El grupo "${destinoSelect.options[destinoSelect.selectedIndex]?.text}" no está en la lista de alícuotas.`);
-          return;
-        }
-      }
-      gastosEspecificos.push({ tipo: tipoDest, id: parseInt(id), monto });
-    }
-  }
-  const totalGastosEspecificosUSD = gastosEspecificos.reduce((sum, ge) => sum + ge.monto, 0);
-  const totalGastosUSD = totalGastosGeneralesUSD + totalGastosEspecificosUSD;
-
-  // 4. Calcular montos por propietario (solo grupos con alícuota)
-  const todosPropietarios = await api.getPropietarios();
-  const propietariosPorGrupo = {};
-  todosPropietarios.forEach(p => {
-    if (!propietariosPorGrupo[p.grupo_id]) propietariosPorGrupo[p.grupo_id] = [];
-    propietariosPorGrupo[p.grupo_id].push(p);
-  });
-  const montoPorPropietario = new Map(); // id -> monto total
-
-  for (const ag of alicuotasGrupo) {
-    const montoGrupo = totalGastosGeneralesUSD * (ag.porcentaje / 100);
-    const propietariosDelGrupo = propietariosPorGrupo[ag.grupoId] || [];
-    if (propietariosDelGrupo.length === 0) continue;
-    const montoPorProp = montoGrupo / propietariosDelGrupo.length;
-    propietariosDelGrupo.forEach(p => {
-      montoPorPropietario.set(p.id, (montoPorPropietario.get(p.id) || 0) + montoPorProp);
-    });
-  }
-  for (const ge of gastosEspecificos) {
-    if (ge.tipo === 'grupo') {
-      const propietariosDelGrupo = propietariosPorGrupo[ge.id] || [];
-      if (propietariosDelGrupo.length === 0) continue;
-      const montoAdicionalPorProp = ge.monto / propietariosDelGrupo.length;
-      propietariosDelGrupo.forEach(p => {
-        montoPorPropietario.set(p.id, (montoPorPropietario.get(p.id) || 0) + montoAdicionalPorProp);
-      });
-    } else if (ge.tipo === 'prop') {
-      montoPorPropietario.set(ge.id, (montoPorPropietario.get(ge.id) || 0) + ge.monto);
-    }
-  }
-
-  // Validación anti-error: si algún propietario tiene monto >= 95% del total y hay más de uno, se rechaza
-  const propietariosList = Array.from(montoPorPropietario.entries());
-  const umbral = 0.95;
-  let error = false;
-  for (let [propId, monto] of propietariosList) {
-    if (propietariosList.length > 1 && monto >= totalGastosUSD * umbral) {
-      const prop = todosPropietarios.find(p => p.id === propId);
-      alert(`Error: El propietario ${prop?.nombre} (${prop?.apartamento}) recibiría ${(monto/totalGastosUSD*100).toFixed(1)}% del total. Revise gastos específicos.`);
-      error = true;
-    }
-  }
-  if (error) return;
-
-  // 5. Crear recibo resumen
-  let reciboId = null;
   try {
+    const periodo = document.getElementById('periodoRecibo')?.value;
+    if (!periodo || !/^\d{2}\/\d{4}$/.test(periodo)) {
+      alert('Período inválido (MM/AAAA)');
+      return;
+    }
+    // Obtener la tasa actual del campo (ya sea automática o manual)
+    const tasaInput = document.getElementById('tasaBCV');
+    if (tasaInput) {
+      currentTasaBCV = parseFloat(tasaInput.value);
+      if (isNaN(currentTasaBCV) || currentTasaBCV <= 0) {
+        alert('Ingrese una tasa BCV válida (positiva)');
+        return;
+      }
+    } else {
+      if (!currentTasaBCV || currentTasaBCV <= 0) {
+        alert('Obtenga o ingrese la tasa BCV primero');
+        return;
+      }
+    }
+
+    // 1. Gastos generales (en VES, convertir a USD con tasa actual)
+    const gastos = [];
+    const filasGastos = document.querySelectorAll('#gastosContainer .gasto-row');
+    for (let f of filasGastos) {
+      const desc = f.querySelector('.gasto-desc')?.value;
+      const montoVES = parseFloat(f.querySelector('.gasto-monto')?.value);
+      if (desc && !isNaN(montoVES) && montoVES > 0) {
+        gastos.push({
+          descripcion: desc,
+          monto_ves: montoVES,
+          monto_usd: montoVES / currentTasaBCV
+        });
+      }
+    }
+    if (gastos.length === 0) {
+      alert('Agregue al menos un gasto general');
+      return;
+    }
+    const totalGastosGeneralesUSD = gastos.reduce((s, g) => s + g.monto_usd, 0);
+
+    // 2. Alícuotas
+    const alicuotasGrupo = [];
+    const rowsGrupo = document.querySelectorAll('#gruposAlicuotasContainer .grupo-alicuota-row');
+    for (const row of rowsGrupo) {
+      const select = row.querySelector('select');
+      const input = row.querySelector('input[type="number"]');
+      if (select?.value && input?.value) {
+        alicuotasGrupo.push({ grupoId: parseInt(select.value), porcentaje: parseFloat(input.value) });
+      }
+    }
+    if (!validarSumaAlicuotas()) {
+      alert('La suma de alícuotas debe ser 100%');
+      return;
+    }
+
+    // 3. Gastos específicos (en VES, convertir a USD)
+    const gastosEspecificos = [];
+    const rowsEsp = document.querySelectorAll('#gastosEspecificosContainer .gasto-especifico-row');
+    const gruposEnAlicuota = new Set(alicuotasGrupo.map(ag => ag.grupoId));
+    for (const row of rowsEsp) {
+      const tipo = row.querySelector('select:first-child')?.value;
+      const destinoSelect = row.querySelector('select:nth-child(2)');
+      const montoVES = parseFloat(row.querySelector('.gasto-especifico-monto-ves')?.value);
+      if (destinoSelect?.value && !isNaN(montoVES) && montoVES > 0) {
+        const [tipoDest, id] = destinoSelect.value.split('_');
+        if (tipoDest === 'grupo') {
+          const grupoId = parseInt(id);
+          if (!gruposEnAlicuota.has(grupoId)) {
+            alert(`Error: El grupo "${destinoSelect.options[destinoSelect.selectedIndex]?.text}" no está en la lista de alícuotas.`);
+            return;
+          }
+        }
+        const montoUSD = montoVES / currentTasaBCV;
+        gastosEspecificos.push({ tipo: tipoDest, id: parseInt(id), monto: montoUSD });
+      }
+    }
+    const totalGastosEspecificosUSD = gastosEspecificos.reduce((sum, ge) => sum + ge.monto, 0);
+    const totalGastosUSD = totalGastosGeneralesUSD + totalGastosEspecificosUSD;
+
+    // 4. Calcular montos por propietario
+    const todosPropietarios = await api.getPropietarios();
+    const propietariosPorGrupo = {};
+    todosPropietarios.forEach(p => {
+      if (!propietariosPorGrupo[p.grupo_id]) propietariosPorGrupo[p.grupo_id] = [];
+      propietariosPorGrupo[p.grupo_id].push(p);
+    });
+    const montoPorPropietario = new Map();
+
+    for (const ag of alicuotasGrupo) {
+      const montoGrupo = totalGastosGeneralesUSD * (ag.porcentaje / 100);
+      const propietariosDelGrupo = propietariosPorGrupo[ag.grupoId] || [];
+      if (propietariosDelGrupo.length === 0) continue;
+      const montoPorProp = montoGrupo / propietariosDelGrupo.length;
+      propietariosDelGrupo.forEach(p => {
+        montoPorPropietario.set(p.id, (montoPorPropietario.get(p.id) || 0) + montoPorProp);
+      });
+    }
+    for (const ge of gastosEspecificos) {
+      if (ge.tipo === 'grupo') {
+        const propietariosDelGrupo = propietariosPorGrupo[ge.id] || [];
+        if (propietariosDelGrupo.length === 0) continue;
+        const montoAdicionalPorProp = ge.monto / propietariosDelGrupo.length;
+        propietariosDelGrupo.forEach(p => {
+          montoPorPropietario.set(p.id, (montoPorPropietario.get(p.id) || 0) + montoAdicionalPorProp);
+        });
+      } else if (ge.tipo === 'prop') {
+        montoPorPropietario.set(ge.id, (montoPorPropietario.get(ge.id) || 0) + ge.monto);
+      }
+    }
+
+    // Validación anti-error
+    const propietariosList = Array.from(montoPorPropietario.entries());
+    const umbral = 0.95;
+    let error = false;
+    for (let [propId, monto] of propietariosList) {
+      if (propietariosList.length > 1 && monto >= totalGastosUSD * umbral) {
+        const prop = todosPropietarios.find(p => p.id === propId);
+        alert(`Error: El propietario ${prop?.nombre} (${prop?.apartamento}) recibiría ${(monto/totalGastosUSD*100).toFixed(1)}% del total. Revise gastos específicos.`);
+        error = true;
+      }
+    }
+    if (error) return;
+
+    // 5. Crear recibo
+    let reciboId = null;
     const reciboData = {
       periodo,
       monto_usd: totalGastosUSD,
@@ -428,24 +511,18 @@ document.getElementById('formRecibo')?.addEventListener('submit', async (e) => {
       alicuotas_grupo: JSON.stringify(alicuotasGrupo),
       gastos_especificos: JSON.stringify(gastosEspecificos),
       tasa_bcv: currentTasaBCV,
-      fecha_tasa: currentFechaTasa
+      fecha_tasa: currentFechaTasa || new Date().toISOString()
     };
     const reciboCreado = await api.addRecibo(reciboData);
     reciboId = reciboCreado.id;
     if (!reciboId) throw new Error('No se obtuvo ID del recibo');
     console.log('Recibo resumen creado con ID:', reciboId);
-  } catch (err) {
-    console.error('Error al crear recibo:', err);
-    alert('Error al crear el recibo: ' + err.message);
-    return;
-  }
 
-  // 6. Crear deudas individuales (solo alícuota + específicos)
-  let deudasCreadas = 0;
-  for (let [propId, monto] of montoPorPropietario.entries()) {
-    if (monto <= 0) continue;
-    const montoRedondeado = Math.round(monto * 100) / 100;
-    try {
+    // 6. Crear deudas
+    let deudasCreadas = 0;
+    for (let [propId, monto] of montoPorPropietario.entries()) {
+      if (monto <= 0) continue;
+      const montoRedondeado = Math.round(monto * 100) / 100;
       await api.addDeuda({
         propietario_id: propId,
         periodo,
@@ -455,24 +532,31 @@ document.getElementById('formRecibo')?.addEventListener('submit', async (e) => {
         porcentaje_alicuota: (montoRedondeado / totalGastosUSD) * 100
       });
       deudasCreadas++;
-    } catch (err) {
-      console.error(`Error al crear deuda para propietario ${propId}:`, err);
+    }
+
+    alert(`✅ Recibo creado. Se generaron ${deudasCreadas} deudas.`);
+    const modal = document.getElementById('modalRecibo');
+    if (modal) modal.style.display = 'none';
+    cargarRecibos();
+    if (propiedadSeleccionada) {
+      cargarDeudas(propiedadSeleccionada);
+      await actualizarSaldoPropietario(propiedadSeleccionada);
+    }
+    cargarPagosPendientes();
+    cargarPropietarios(grupoPropSeleccionado);
+  } catch (err) {
+    console.error('Error al crear recibo:', err);
+    alert('Error al crear el recibo: ' + err.message);
+  } finally {
+    isSubmitting = false;
+    if (submitBtn) {
+      submitBtn.disabled = false;
+      submitBtn.textContent = originalText;
     }
   }
-
-  alert(`✅ Recibo creado. Se generaron ${deudasCreadas} deudas.`);
-  const modal = document.getElementById('modalRecibo');
-  if (modal) modal.style.display = 'none';
-  cargarRecibos();
-  if (propiedadSeleccionada) {
-    cargarDeudas(propiedadSeleccionada);
-    await actualizarSaldoPropietario(propiedadSeleccionada);
-  }
-  cargarPagosPendientes();
-  cargarPropietarios(grupoPropSeleccionado);
 });
 
-// ========== BOTÓN AGREGAR RECIBO ==========
+// ========== BOTÓN AGREGAR RECIBO Y CONFIGURACIÓN DEL MODAL ==========
 const btnAgregarRecibo = document.getElementById('btnAgregarRecibo');
 if (btnAgregarRecibo) {
   btnAgregarRecibo.addEventListener('click', async () => {
@@ -513,24 +597,50 @@ if (btnAgregarRecibo) {
 }
 
 // ========== EVENTOS DEL MODAL RECIBO ==========
+// Botón para obtener tasa automática (sigue funcionando, pero el campo ya es editable)
 document.getElementById('btnActualizarTasa')?.addEventListener('click', () => obtenerTasaBCV());
 document.getElementById('btnAgregarGasto')?.addEventListener('click', () => agregarFilaGasto());
 document.getElementById('btnAgregarGrupoAlicuota')?.addEventListener('click', () => agregarGrupoAlicuota());
 document.getElementById('btnAgregarGastoEspecifico')?.addEventListener('click', () => agregarGastoEspecifico());
 
+// Cierre del modal (botón ×)
+const modalRecibo = document.getElementById('modalRecibo');
+const closeBtn = modalRecibo?.querySelector('.close');
+if (closeBtn) {
+  closeBtn.addEventListener('click', () => {
+    modalRecibo.style.display = 'none';
+  });
+}
+// También cerrar al hacer clic fuera del contenido
+window.addEventListener('click', (e) => {
+  if (e.target === modalRecibo) {
+    modalRecibo.style.display = 'none';
+  }
+});
+
+// Eventos para recalcular cuando cambian los inputs
 document.addEventListener('change', (e) => {
   if (e.target.closest('#gruposAlicuotasContainer, #gastosEspecificosContainer, #gastosContainer')) recalcularTodo();
 });
 document.addEventListener('input', (e) => {
   if (e.target.closest('#gruposAlicuotasContainer, #gastosEspecificosContainer, #gastosContainer')) recalcularTodo();
+  // Si cambia la tasa BCV manualmente, actualizar todos los cálculos
+  if (e.target.id === 'tasaBCV') {
+    const nuevaTasa = parseFloat(e.target.value);
+    if (!isNaN(nuevaTasa) && nuevaTasa > 0) {
+      currentTasaBCV = nuevaTasa;
+      calcularTotalGastos();
+      actualizarUSDEnGastosEspecificos();
+      recalcularTodo();
+    }
+  }
 });
 
 // ========== FUNCIONES EXISTENTES (PROPIETARIOS, GRUPOS, DEUDAS, PAGOS) ==========
-// A continuación se incluyen todas las funciones originales que ya estaban en el sistema.
-// Se mantienen exactamente igual que en la versión inicial, sin modificaciones.
-// (Código idéntico al que tenías originalmente para cargar grupos, propietarios, etc.)
-
-// ---------- Funciones auxiliares ----------
+// ... (el resto de las funciones originales se mantienen igual, no se modifican)
+// Asegúrate de que todo el código que ya tenías (cargarGruposPropietarios, cargarPropietarios, etc.) esté presente.
+// Por brevedad, no repito aquí todo el código que ya está en tu archivo.
+// Debes conservar todo el contenido desde "// ---------- Funciones auxiliares ----------" hasta el final.
 function generarUsernameBase(apartamento) {
   return apartamento.toLowerCase().replace(/\s+/g, '').replace(/[^a-z0-9]/g, '');
 }
