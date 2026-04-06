@@ -1,5 +1,5 @@
 // public/propietario.js - Panel del propietario con detalle de recibos y comprobantes
-// Modificado: muestra monto en Bs en gastos específicos y agrega botón de imprimir/PDF.
+// Modificado: muestra descripción en gastos específicos, monto en Bs y botón de imprimir/PDF.
 
 console.log('Panel de propietario cargado');
 
@@ -162,7 +162,7 @@ async function cargarDeudas() {
   }
 }
 
-// ========== MODAL DE DETALLE DEL RECIBO (CON BOTÓN IMPRIMIR Y MONTO BS EN ESPECÍFICOS) ==========
+// ========== MODAL DE DETALLE DEL RECIBO (CON BOTÓN IMPRIMIR Y DESCRIPCIÓN EN ESPECÍFICOS) ==========
 let modalDetalle = document.getElementById('modalDetalleRecibo');
 if (!modalDetalle) {
   modalDetalle = document.createElement('div');
@@ -272,7 +272,7 @@ async function mostrarDetalleRecibo(reciboId, deudaId) {
     html += `<h4>📋 Gastos generales del condominio:</h4>`;
     if (recibo.gastos_generales && recibo.gastos_generales.length) {
       html += `<table style="width:100%; border-collapse:collapse; margin-top:10px;">
-        <thead><tr style="background:#f2f2f2;"><th>Descripción</th><th>Monto (Bs)</th><th>Monto (USD)</th></tr></thead>
+        <thead><tr style="background:#f2f2f2;"><th>Descripción</th><th>Monto (Bs)</th><th>Monto (USD)</th><tr></thead>
         <tbody>`;
       recibo.gastos_generales.forEach(g => {
         html += `<tr>
@@ -286,11 +286,16 @@ async function mostrarDetalleRecibo(reciboId, deudaId) {
       html += `<p>No hay desglose de gastos generales disponible.</p>`;
     }
 
-    // Gastos específicos (adicionales) con monto en Bs también (calculado a partir de USD * tasa del recibo)
+    // Gastos específicos (adicionales) con descripción, monto en USD y Bs
     if (recibo.gastos_especificos && recibo.gastos_especificos.length) {
       html += `<h4>🎯 Gastos específicos adicionales:</h4>`;
       html += `<table style="width:100%; border-collapse:collapse; margin-top:10px;">
-        <thead><tr style="background:#f2f2f2;"><th>Afecta a</th><th>Monto (USD)</th><th>Monto (Bs)*</th></tr></thead>
+        <thead><tr style="background:#f2f2f2;">
+          <th>Descripción</th>
+          <th>Afecta a</th>
+          <th>Monto (USD)</th>
+          <th>Monto (Bs)*</th>
+        </tr></thead>
         <tbody>`;
       recibo.gastos_especificos.forEach(ge => {
         let destino = '';
@@ -301,10 +306,11 @@ async function mostrarDetalleRecibo(reciboId, deudaId) {
           destino = `Propietario ID ${ge.id}`;
         }
         const montoUSD = ge.monto || 0;
-        // Calcular bolívares usando la tasa del recibo (almacenada en recibo.tasa_bcv)
         const tasa = recibo.tasa_bcv || 1;
         const montoBs = montoUSD * tasa;
+        const descripcion = ge.descripcion || '—';
         html += `<tr>
+          <td>${descripcion}</td>
           <td>${destino}</td>
           <td>$${montoUSD.toFixed(2)}</td>
           <td>${montoBs.toFixed(2)} Bs</td>
