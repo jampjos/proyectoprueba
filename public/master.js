@@ -719,6 +719,9 @@ function crearModalVerRecibo() {
 
 async function verRecibo(reciboId) {
   try {
+    // Asegurar que el modal existe antes de usarlo
+    crearModalVerRecibo();
+    
     const recibo = await api.getReciboById(reciboId);
     if (!recibo) throw new Error('No se pudo obtener el recibo');
 
@@ -774,7 +777,7 @@ async function verRecibo(reciboId) {
           <th>Afecta a</th>
           <th>Monto (USD)</th>
           <th>Monto (Bs)*</th>
-        </table></thead>
+        </tr></thead>
         <tbody>`;
       recibo.gastos_especificos.forEach(ge => {
         let destino = '';
@@ -830,16 +833,22 @@ async function verRecibo(reciboId) {
       html += `<p>No hay distribución por grupos.</p>`;
     }
 
-    document.getElementById('verReciboContent').innerHTML = html;
-    crearModalVerRecibo(); // asegurar que el modal existe
+    // Ahora que el modal existe, asignamos el contenido
+    const contentDiv = document.getElementById('verReciboContent');
+    if (contentDiv) {
+      contentDiv.innerHTML = html;
+    } else {
+      console.error('No se encontró el elemento verReciboContent');
+      alert('Error al mostrar el detalle del recibo. Intente recargar la página.');
+      return;
+    }
+    
     modalVerRecibo.style.display = 'block';
   } catch (err) {
     console.error(err);
     alert('Error al cargar detalle del recibo: ' + err.message);
   }
-}
-
-// Cargar lista de recibos (con botón "Ver Recibo" en lugar de "Eliminar")
+}// Cargar lista de recibos (con botón "Ver Recibo" en lugar de "Eliminar")
 async function cargarRecibos() {
   const tbody = document.querySelector('#tablaRecibos tbody');
   if (!tbody) return;
