@@ -160,6 +160,17 @@ async function setupDatabase() {
   await addColumnIfNotExists('recibos', 'tasa_bcv', 'REAL');
   await addColumnIfNotExists('recibos', 'fecha_tasa', 'TEXT');
 
+  // Limpiar referencias huérfanas: deudas con recibo_id que no existe
+  const orphanResult = await pool.query(`
+    UPDATE deudas 
+    SET recibo_id = NULL 
+    WHERE recibo_id IS NOT NULL 
+      AND NOT EXISTS (SELECT 1 FROM recibos WHERE id = deudas.recibo_id)
+  `);
+  if (orphanResult.rowCount > 0) {
+    console.log(`🧹 Se limpiaron ${orphanResult.rowCount} referencias huérfanas en deudas.recibo_id`);
+  }
+
   // Crear usuario admin si no existe
   const admin = await pool.query("SELECT id FROM usuarios WHERE username = 'admin'");
   if (admin.rows.length === 0) {
@@ -243,7 +254,7 @@ app.delete('/api/grupos/:id', authenticateToken, async (req, res) => {
   } finally { client.release(); }
 });
 
-// ========== RUTA CORREGIDA: Asignar propietarios a grupo ==========
+// Asignar propietarios a grupo
 app.post('/api/grupos/:id/asignar', authenticateToken, async (req, res) => {
   const { id } = req.params;
   const { ids } = req.body;
@@ -415,7 +426,6 @@ app.get('/api/recibos/:id', authenticateToken, async (req, res) => {
     const result = await pool.query('SELECT * FROM recibos WHERE id = $1', [id]);
     if (result.rows.length === 0) return res.status(404).json({ error: 'Recibo no encontrado' });
     let recibo = result.rows[0];
-    // Parsear JSON (PostgreSQL ya los devuelve como objeto si son JSONB)
     if (recibo.gastos_generales && typeof recibo.gastos_generales === 'string') recibo.gastos_generales = JSON.parse(recibo.gastos_generales);
     if (recibo.alicuotas_grupo && typeof recibo.alicuotas_grupo === 'string') recibo.alicuotas_grupo = JSON.parse(recibo.alicuotas_grupo);
     if (recibo.gastos_especificos && typeof recibo.gastos_especificos === 'string') recibo.gastos_especificos = JSON.parse(recibo.gastos_especificos);
@@ -424,12 +434,29 @@ app.get('/api/recibos/:id', authenticateToken, async (req, res) => {
   } catch (err) { res.status(500).json({ error: err.message }); }
 });
 
+// ========== ELIMINAR RECIBO (con validación de deudas pendientes) ==========
 app.delete('/api/recibos/:id', authenticateToken, async (req, res) => {
   const { id } = req.params;
   try {
+    // Verificar si hay deudas NO PAGADAS asociadas a este recibo
+    const deudasPendientes = await pool.query(
+      'SELECT id FROM deudas WHERE recibo_id = $1 AND pagado = false',
+      [id]
+    );
+    if (deudasPendientes.rows.length > 0) {
+      return res.status(400).json({ 
+        error: 'No se puede eliminar el recibo porque tiene deudas pendientes asociadas. Primero deben pagarse.' 
+      });
+    }
+    // Si no hay deudas pendientes, se puede eliminar
     const result = await pool.query('DELETE FROM recibos WHERE id = $1', [id]);
+    // Opcional: limpiar la referencia en las deudas (por si alguna quedó huérfana)
+    await pool.query('UPDATE deudas SET recibo_id = NULL WHERE recibo_id = $1', [id]);
     res.json({ changes: result.rowCount });
-  } catch (err) { res.status(500).json({ error: err.message }); }
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ error: err.message });
+  }
 });
 
 // ---------- Deudas ----------
