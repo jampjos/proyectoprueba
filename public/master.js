@@ -649,6 +649,234 @@ document.addEventListener('input', (e) => {
   }
 });
 
+// ========== FUNCIONES DE RECIBOS (LISTADO Y VER DETALLE) ==========
+// Modal para ver detalle de recibo (similar al del propietario, pero para master)
+let modalVerRecibo = null;
+
+function crearModalVerRecibo() {
+  if (modalVerRecibo) return;
+  modalVerRecibo = document.createElement('div');
+  modalVerRecibo.id = 'modalVerRecibo';
+  modalVerRecibo.className = 'modal';
+  modalVerRecibo.innerHTML = `
+    <div class="modal-content" style="width: 700px; max-width: 95%;">
+      <span class="close">&times;</span>
+      <h3>Detalles del Recibo</h3>
+      <div id="verReciboContent" style="max-height: 70vh; overflow-y: auto;"></div>
+      <div style="margin-top: 15px; text-align: center;">
+        <button id="btnImprimirRecibo" style="background-color: #28a745; color: white; border: none; padding: 8px 16px; border-radius: 4px; cursor: pointer;">🖨️ Imprimir / Guardar PDF</button>
+      </div>
+    </div>
+  `;
+  document.body.appendChild(modalVerRecibo);
+
+  const closeSpan = modalVerRecibo.querySelector('.close');
+  closeSpan.addEventListener('click', () => modalVerRecibo.style.display = 'none');
+  window.addEventListener('click', (e) => {
+    if (e.target === modalVerRecibo) modalVerRecibo.style.display = 'none';
+  });
+
+  const btnImprimir = document.getElementById('btnImprimirRecibo');
+  if (btnImprimir) {
+    btnImprimir.addEventListener('click', () => {
+      const contenido = document.getElementById('verReciboContent').innerHTML;
+      const titulo = 'Detalles del Recibo';
+      const ventana = window.open('', '_blank', 'width=800,height=600,toolbar=yes,scrollbars=yes');
+      ventana.document.write(`
+        <!DOCTYPE html>
+        <html>
+        <head>
+          <title>${titulo}</title>
+          <style>
+            body { font-family: Arial, sans-serif; padding: 20px; margin: 0; }
+            .detalle-container { max-width: 800px; margin: auto; }
+            table { width: 100%; border-collapse: collapse; margin: 10px 0; }
+            th, td { border: 1px solid #ddd; padding: 8px; text-align: left; }
+            th { background-color: #f2f2f2; }
+            h4 { margin-top: 20px; }
+            @media print {
+              body { margin: 0; padding: 0; }
+              button { display: none; }
+            }
+          </style>
+        </head>
+        <body>
+          <div class="detalle-container">
+            <h3>${titulo}</h3>
+            ${contenido}
+            <p style="text-align: center; margin-top: 30px; font-size: 12px; color: gray;">Documento generado automáticamente - ${new Date().toLocaleString()}</p>
+          </div>
+          <script>
+            window.onload = function() { window.print(); setTimeout(() => window.close(), 500); };
+          <\/script>
+        </body>
+        </html>
+      `);
+      ventana.document.close();
+    });
+  }
+}
+
+async function verRecibo(reciboId) {
+  try {
+    const recibo = await api.getReciboById(reciboId);
+    if (!recibo) throw new Error('No se pudo obtener el recibo');
+
+    // Calcular total de gastos generales
+    let totalGastosGenerales = 0;
+    if (recibo.gastos_generales && recibo.gastos_generales.length) {
+      totalGastosGenerales = recibo.gastos_generales.reduce((sum, g) => sum + (g.monto_usd || 0), 0);
+    }
+    const totalConEspecificos = recibo.monto_usd || 0;
+
+    // Agrupar gastos específicos por grupo
+    const especificosPorGrupo = new Map();
+    if (recibo.gastos_especificos && recibo.gastos_especificos.length) {
+      recibo.gastos_especificos.forEach(ge => {
+        if (ge.tipo === 'grupo') {
+          const grupoId = ge.id;
+          const monto = ge.monto || 0;
+          especificosPorGrupo.set(grupoId, (especificosPorGrupo.get(grupoId) || 0) + monto);
+        }
+      });
+    }
+
+    let html = `<p><strong>Período:</strong> ${recibo.periodo}</p>`;
+    html += `<p><strong>Total gastos generales del condominio:</strong> $${totalGastosGenerales.toFixed(2)}</p>`;
+    if (totalConEspecificos > totalGastosGenerales) {
+      html += `<p><strong>Total con gastos específicos adicionales:</strong> $${totalConEspecificos.toFixed(2)}</p>`;
+    }
+
+    // Desglose de gastos generales
+    html += `<h4>📋 Gastos generales del condominio:</h4>`;
+    if (recibo.gastos_generales && recibo.gastos_generales.length) {
+      html += `<table style="width:100%; border-collapse:collapse; margin-top:10px;">
+        <thead><tr style="background:#f2f2f2;"><th>Descripción</th><th>Monto (Bs)</th><th>Monto (USD)</th></tr></thead>
+        <tbody>`;
+      recibo.gastos_generales.forEach(g => {
+        html += `<tr>
+          <td>${g.descripcion}</td>
+          <td>${(g.monto_ves || 0).toFixed(2)} Bs</td>
+          <td>$${(g.monto_usd || 0).toFixed(2)}</td>
+        </tr>`;
+      });
+      html += `</tbody></table>`;
+    } else {
+      html += `<p>No hay desglose de gastos generales disponible.</p>`;
+    }
+
+    // Gastos específicos (adicionales) con descripción
+    if (recibo.gastos_especificos && recibo.gastos_especificos.length) {
+      html += `<h4>🎯 Gastos específicos adicionales:</h4>`;
+      html += `<table style="width:100%; border-collapse:collapse; margin-top:10px;">
+        <thead><tr style="background:#f2f2f2;">
+          <th>Descripción</th>
+          <th>Afecta a</th>
+          <th>Monto (USD)</th>
+          <th>Monto (Bs)*</th>
+        </table></thead>
+        <tbody>`;
+      recibo.gastos_especificos.forEach(ge => {
+        let destino = '';
+        if (ge.tipo === 'grupo') {
+          const grupo = grupos.find(g => g.id === ge.id);
+          destino = grupo ? `Grupo ${grupo.nombre}` : `Grupo ID ${ge.id}`;
+        } else {
+          destino = `Propietario ID ${ge.id}`;
+        }
+        const montoUSD = ge.monto || 0;
+        const tasa = recibo.tasa_bcv || 1;
+        const montoBs = montoUSD * tasa;
+        const descripcion = ge.descripcion || '—';
+        html += `<tr>
+          <td>${descripcion}</td>
+          <td>${destino}</td>
+          <td>$${montoUSD.toFixed(2)}</td>
+          <td>${montoBs.toFixed(2)} Bs</td>
+        </tr>`;
+      });
+      html += `</tbody></table>`;
+      html += `<p><small>* Monto en bolívares calculado usando la tasa BCV del momento del recibo (${recibo.tasa_bcv?.toFixed(2) || 'N/A'} Bs/USD).</small></p>`;
+    }
+
+    // Distribución por grupos con montos base + específicos
+    html += `<h4>🏢 Distribución por grupos (alícuotas):</h4>`;
+    if (recibo.alicuotas_grupo && recibo.alicuotas_grupo.length) {
+      html += `<table style="width:100%; border-collapse:collapse; margin-top:10px;">
+        <thead><tr style="background:#f2f2f2;">
+          <th>Grupo</th>
+          <th>Porcentaje</th>
+          <th>Monto base</th>
+          <th>Gastos específicos</th>
+          <th>Monto total del grupo</th>
+        </tr></thead>
+        <tbody>`;
+      recibo.alicuotas_grupo.forEach(ag => {
+        const grupo = grupos.find(g => g.id === ag.grupoId);
+        const nombreGrupo = grupo ? grupo.nombre : `Grupo ${ag.grupoId}`;
+        const montoBase = totalGastosGenerales * (ag.porcentaje / 100);
+        const especificos = especificosPorGrupo.get(ag.grupoId) || 0;
+        const totalGrupo = montoBase + especificos;
+        html += `<tr>
+          <td>${nombreGrupo}</td>
+          <td>${ag.porcentaje.toFixed(3)}%</td>
+          <td>$${montoBase.toFixed(2)}</td>
+          <td>$${especificos.toFixed(2)}</td>
+          <td><strong>$${totalGrupo.toFixed(2)}</strong></td>
+        </tr>`;
+      });
+      html += `</tbody></table>`;
+    } else {
+      html += `<p>No hay distribución por grupos.</p>`;
+    }
+
+    document.getElementById('verReciboContent').innerHTML = html;
+    crearModalVerRecibo(); // asegurar que el modal existe
+    modalVerRecibo.style.display = 'block';
+  } catch (err) {
+    console.error(err);
+    alert('Error al cargar detalle del recibo: ' + err.message);
+  }
+}
+
+// Cargar lista de recibos (con botón "Ver Recibo" en lugar de "Eliminar")
+async function cargarRecibos() {
+  const tbody = document.querySelector('#tablaRecibos tbody');
+  if (!tbody) return;
+  tbody.innerHTML = '<td colspan="4">Cargando...<\/td>';
+  try {
+    recibos = await api.getRecibos();
+    tbody.innerHTML = '';
+    for (const r of recibos) {
+      const grupo = grupos.find(g => g.id === r.grupo_id);
+      const grupoNombre = grupo ? grupo.nombre : 'Todos';
+      const tr = document.createElement('tr');
+      tr.innerHTML = `
+          <td>${r.periodo}</td>
+          <td>$${r.monto_usd.toFixed(2)}</td>
+          <td>${grupoNombre}</td>
+          <td><button onclick="verRecibo(${r.id})" style="background-color:#17a2b8;">Ver Recibo</button></td>
+      `;
+      tbody.appendChild(tr);
+    }
+  } catch (err) {
+    console.error(err);
+    tbody.innerHTML = `<td colspan="4">Error: ${err.message}<\/td>`;
+  }
+}
+
+// NOTA: La función eliminarRecibo se mantiene por si se necesita en el futuro, pero ya no se usa en la tabla.
+window.eliminarRecibo = async (id) => {
+  if (confirm('¿Eliminar este recibo? Se eliminará el recibo, pero las deudas generadas quedarán en el sistema.')) {
+    try {
+      await api.deleteRecibo(id);
+      cargarRecibos();
+    } catch (err) {
+      alert('Error al eliminar: ' + err.message);
+    }
+  }
+};
+
 // ========== FUNCIONES EXISTENTES (PROPIETARIOS, GRUPOS, DEUDAS, PAGOS) ==========
 // ... (el resto de las funciones originales se mantienen igual, no se modifican)
 // Asegúrate de que todo el código que ya tenías (cargarGruposPropietarios, cargarPropietarios, etc.) esté presente.
@@ -1100,43 +1328,6 @@ formGrupo.addEventListener('submit', async (e) => {
     alert('Error al guardar grupo: ' + err.message);
   }
 });
-
-// Recibos existentes
-async function cargarRecibos() {
-  const tbody = document.querySelector('#tablaRecibos tbody');
-  if (!tbody) return;
-  tbody.innerHTML = '<td colspan="4">Cargando...<\/td>';
-  try {
-    recibos = await api.getRecibos();
-    tbody.innerHTML = '';
-    for (const r of recibos) {
-      const grupo = grupos.find(g => g.id === r.grupo_id);
-      const grupoNombre = grupo ? grupo.nombre : 'Todos';
-      const tr = document.createElement('tr');
-      tr.innerHTML = `
-          <td>${r.periodo}</td>
-          <td>$${r.monto_usd.toFixed(2)}</td>
-          <td>${grupoNombre}</td>
-          <td><button onclick="eliminarRecibo(${r.id})">Eliminar</button></td>
-      `;
-      tbody.appendChild(tr);
-    }
-  } catch (err) {
-    console.error(err);
-    tbody.innerHTML = `<td colspan="4">Error: ${err.message}<\/td>`;
-  }
-}
-
-window.eliminarRecibo = async (id) => {
-  if (confirm('¿Eliminar este recibo? Se eliminará el recibo, pero las deudas generadas quedarán en el sistema.')) {
-    try {
-      await api.deleteRecibo(id);
-      cargarRecibos();
-    } catch (err) {
-      alert('Error al eliminar: ' + err.message);
-    }
-  }
-};
 
 // Deudas, pagos, etc.
 async function cargarGruposParaDeudas() {
